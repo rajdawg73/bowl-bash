@@ -42,11 +42,8 @@
     // Initialize Firebase
     const app = firebase.initializeApp(firebaseConfig);
     const database = firebase.database();
-
-    // ============================================================
-    // ADMIN PIN - CHANGE THIS TO YOUR OWN SECRET PIN
-    // ============================================================
-    const ADMIN_PIN = "1234";
+    // Admin PIN is stored in Firebase at /config/adminPinHash
+    // To set it: go to Firebase Console > Realtime Database > Add /config/adminPinHash with SHA-256 hash of your PIN
 
     // Games data
     const GAMES = [
@@ -121,6 +118,7 @@
       const [isUnlocked, setIsUnlocked] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [showPinModal, setShowPinModal] = useState(false);
+      const [adminPinHash, setAdminPinHash] = useState(null);
       const [dbStatus, setDbStatus] = useState('connecting');
 
       // Load from Firebase on mount and listen for changes
@@ -142,9 +140,17 @@
           if (data) setTiebreakerScore(data);
         });
 
+        // Load admin PIN hash from Firebase
+        const pinHashRef = database.ref('config/adminPinHash');
+        pinHashRef.on('value', (snapshot) => {
+          const hash = snapshot.val();
+          if (hash) setAdminPinHash(hash);
+        });
+
         return () => {
           resultsRef.off();
           tiebreakerRef.off();
+          pinHashRef.off();
         };
       }, []);
 
@@ -218,9 +224,32 @@
       const pot = useMemo(() => standings.reduce((sum, e) => sum + e.losses, 0) * 10, [standings]);
 
       const myStandings = useMemo(() => {
+        const totalEntries = standings.length;
         return MY_ENTRIES.map(name => {
           const idx = standings.findIndex(e => e.name === name);
-          return idx >= 0 ? { ...standings[idx], rank: idx + 1 } : null;
+          if (idx < 0) return null;
+          const entry = standings[idx];
+          const rank = idx + 1;
+          
+          // Projected wins (ATS = ~50% each game)
+          const projectedWins = entry.wins + (entry.pending * 0.5);
+          
+          // Best/worst case scenarios
+          const bestCaseWins = entry.wins + entry.pending;
+          const worstCaseWins = entry.wins;
+          
+          // Estimate finish range by finding where best/worst case would land
+          const bestRank = standings.filter(e => e.wins > bestCaseWins).length + 1;
+          const worstRank = Math.min(totalEntries, standings.filter(e => e.wins >= worstCaseWins).length);
+          
+          return { 
+            ...entry, 
+            rank,
+            projectedWins: projectedWins.toFixed(1),
+            bestRank,
+            worstRank,
+            projectedRank: Math.round((bestRank + worstRank) / 2)
+          };
         }).filter(Boolean);
       }, [standings]);
 
@@ -232,9 +261,26 @@
         saveResults(newResults);
       };
 
-      const handlePinSubmit = () => {
-        if (pinInput === ADMIN_PIN) { setIsUnlocked(true); setShowPinModal(false); setPinInput(''); }
-        else { alert('Incorrect PIN'); setPinInput(''); }
+      // Hash function for PIN verification
+      const hashPin = async (pin) => {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(pin);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      };
+
+      const handlePinSubmit = async () => {
+        if (!adminPinHash) { alert('PIN not configured in Firebase'); return; }
+        const inputHash = await hashPin(pinInput);
+        if (inputHash === adminPinHash) { 
+          setIsUnlocked(true); 
+          setShowPinModal(false); 
+          setPinInput(''); 
+        } else { 
+          alert('Incorrect PIN'); 
+          setPinInput(''); 
+        }
       };
 
       const getPickName = (pick, gameNum) => {
@@ -364,29 +410,43 @@
               {/* My Entries */}
               <div style={{ background: 'rgba(228,28,56,0.1)', padding: '15px', borderRadius: '12px', marginBottom: '20px', border: '1px solid rgba(228,28,56,0.3)' }}>
                 <h3 style={{ color: '#E41C38', margin: '0 0 12px', fontSize: '0.9rem' }}>MY ENTRIES</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                   {myStandings.map(entry => {
                     const data = MY_ENTRIES_DATA[entry.name] || {};
                     return (
                       <div key={entry.name} style={{ background: 'rgba(0,0,0,0.5)', padding: '14px', borderRadius: '10px', border: '1px solid rgba(228,28,56,0.2)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
                           <div style={{ fontSize: '0.8rem', color: '#F5F5DC', fontWeight: 'bold' }}>{entry.name.replace("BIG TUNA'S ", "").replace("THE ", "")}</div>
                           <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: entry.rank <= 9 ? '#ffd93d' : entry.rank <= 100 ? '#E41C38' : '#9CA3AF' }}>#{entry.rank}</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                           <span style={{ fontSize: '0.85rem' }}>
                             <span style={{ color: '#6ee7b7' }}>{entry.wins}W</span>
                             <span style={{ color: '#4a4a4a' }}> / </span>
                             <span style={{ color: '#f87171' }}>{entry.losses}L</span>
+                            <span style={{ color: '#4a4a4a' }}> / </span>
+                            <span style={{ color: '#9CA3AF' }}>{entry.pending}P</span>
                           </span>
                           {data.swingGames > 0 && (
-                            <span style={{ fontSize: '0.7rem', background: 'rgba(228,28,56,0.3)', padding: '2px 8px', borderRadius: '4px', color: '#F5F5DC' }}>
-                              {data.swingGames} swing {data.swingGames === 1 ? 'game' : 'games'}
+                            <span style={{ fontSize: '0.65rem', background: 'rgba(228,28,56,0.3)', padding: '2px 6px', borderRadius: '4px', color: '#F5F5DC' }}>
+                              {data.swingGames} swing
                             </span>
                           )}
                         </div>
+                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px', marginTop: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', marginBottom: '4px' }}>
+                            <span style={{ color: '#9CA3AF' }}>Proj. Wins:</span>
+                            <span style={{ color: '#F5F5DC', fontWeight: 'bold' }}>{entry.projectedWins}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem' }}>
+                            <span style={{ color: '#9CA3AF' }}>Finish Range:</span>
+                            <span style={{ color: '#6ee7b7' }}>#{entry.bestRank}</span>
+                            <span style={{ color: '#9CA3AF' }}>to</span>
+                            <span style={{ color: '#f87171' }}>#{entry.worstRank}</span>
+                          </div>
+                        </div>
                         {data.keyGames && (
-                          <div style={{ fontSize: '0.65rem', color: '#9CA3AF', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '6px', marginTop: '4px' }}>
+                          <div style={{ fontSize: '0.6rem', color: '#9CA3AF', marginTop: '6px', fontStyle: 'italic' }}>
                             {data.keyGames}
                           </div>
                         )}
@@ -395,7 +455,9 @@
                   })}
                 </div>
                 <div style={{ marginTop: '12px', padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', fontSize: '0.7rem', color: '#9CA3AF' }}>
-                  <span style={{ color: '#F5F5DC' }}>All 4 agree on 12 games</span> • Split on 15 games (hedged) • <span style={{ color: '#6ee7b7' }}>TRIPOD has most leverage</span>
+                  <span style={{ color: '#F5F5DC' }}>All 4 agree on 12 games</span> • Split on 15 (hedged) • <span style={{ color: '#6ee7b7' }}>TRIPOD has most leverage</span>
+                </div>
+              </div>
                 </div>
               </div>
             </>
