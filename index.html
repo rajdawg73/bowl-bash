@@ -46,7 +46,7 @@
     // ============================================================
     // ADMIN PIN - CHANGE THIS TO YOUR OWN SECRET PIN
     // ============================================================
-    const ADMIN_PIN = "1234";
+    // Admin PIN is now stored in Firebase at /config/adminPinHash
 
     // Games data
     const GAMES = [
@@ -121,6 +121,7 @@
       const [isUnlocked, setIsUnlocked] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [showPinModal, setShowPinModal] = useState(false);
+      const [adminPinHash, setAdminPinHash] = useState(null);
       const [dbStatus, setDbStatus] = useState('connecting');
 
       // Load from Firebase on mount and listen for changes
@@ -142,9 +143,15 @@
           if (data) setTiebreakerScore(data);
         });
 
+        // Load admin PIN hash from Firebase
+        const pinHashRef = database.ref("config/adminPinHash");
+        pinHashRef.on("value", (snapshot) => {
+          if (snapshot.val()) setAdminPinHash(snapshot.val());
+        });
         return () => {
           resultsRef.off();
           tiebreakerRef.off();
+          pinHashRef.off();
         };
       }, []);
 
@@ -241,9 +248,26 @@
         saveResults(newResults);
       };
 
-      const handlePinSubmit = () => {
-        if (pinInput === ADMIN_PIN) { setIsUnlocked(true); setShowPinModal(false); setPinInput(''); }
-        else { alert('Incorrect PIN'); setPinInput(''); }
+      // Hash function for PIN
+      const hashPin = async (pin) => {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(pin);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+      };
+
+      const handlePinSubmit = async () => {
+        if (!adminPinHash) { alert("PIN not configured in Firebase"); return; }
+        const inputHash = await hashPin(pinInput);
+        if (inputHash === adminPinHash) {
+          setIsUnlocked(true);
+          setShowPinModal(false);
+          setPinInput("");
+        } else {
+          alert("Incorrect PIN");
+          setPinInput("");
+        }
       };
 
       const getPickName = (pick, gameNum) => {
