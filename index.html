@@ -218,9 +218,18 @@
       const pot = useMemo(() => standings.reduce((sum, e) => sum + e.losses, 0) * 10, [standings]);
 
       const myStandings = useMemo(() => {
+        const totalEntries = standings.length;
         return MY_ENTRIES.map(name => {
           const idx = standings.findIndex(e => e.name === name);
-          return idx >= 0 ? { ...standings[idx], rank: idx + 1 } : null;
+          if (idx < 0) return null;
+          const entry = standings[idx];
+          const rank = idx + 1;
+          const projectedWins = (entry.wins + (entry.pending * 0.5)).toFixed(1);
+          const bestCaseWins = entry.wins + entry.pending;
+          const worstCaseWins = entry.wins;
+          const bestRank = standings.filter(e => e.wins > bestCaseWins).length + 1;
+          const worstRank = Math.min(totalEntries, standings.filter(e => e.wins >= worstCaseWins).length);
+          return { ...entry, rank, projectedWins, bestRank, worstRank };
         }).filter(Boolean);
       }, [standings]);
 
@@ -384,6 +393,16 @@
                               {data.swingGames} swing {data.swingGames === 1 ? 'game' : 'games'}
                             </span>
                           )}
+                        </div>
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "6px 8px", borderRadius: "6px", marginTop: "6px", fontSize: "0.7rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
+                            <span style={{ color: "#9CA3AF" }}>Proj:</span>
+                            <span style={{ color: "#F5F5DC" }}>{entry.projectedWins}W</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: "#9CA3AF" }}>Range:</span>
+                            <span><span style={{ color: "#6ee7b7" }}>#{entry.bestRank}</span> - <span style={{ color: "#f87171" }}>#{entry.worstRank}</span></span>
+                          </div>
                         </div>
                         {data.keyGames && (
                           <div style={{ fontSize: '0.65rem', color: '#9CA3AF', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '6px', marginTop: '4px' }}>
