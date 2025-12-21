@@ -123,6 +123,7 @@
       const [showPinModal, setShowPinModal] = useState(false);
       const [adminPinHash, setAdminPinHash] = useState(null);
       const [dbStatus, setDbStatus] = useState('connecting');
+      const [expandedRecords, setExpandedRecords] = useState({});
 
       // Load from Firebase on mount and listen for changes
       useEffect(() => {
@@ -238,6 +239,114 @@
           const worstRank = Math.min(totalEntries, standings.filter(e => e.wins >= worstCaseWins).length);
           return { ...entry, rank, projectedWins, bestRank, worstRank };
         }).filter(Boolean);
+      }, [standings]);
+
+      // Monte Carlo Simulation (10,000 iterations)
+      const monteCarloResults = useMemo(() => {
+        const SIMS = 10000;
+        const pendingGames = [];
+        for (let i = 0; i < 27; i++) {
+          if (!results[i + 1]) pendingGames.push(i);
+        }
+        if (pendingGames.length === 0) return null;
+
+        const simResults = {};
+        MY_ENTRIES.forEach(name => {
+          simResults[name] = { finishes: [], top10: 0, wins: 0 };
+        });
+
+        for (let sim = 0; sim < SIMS; sim++) {
+          // Generate random outcomes for pending games
+          const simOutcomes = {};
+          pendingGames.forEach(gameIdx => {
+            const game = GAMES[gameIdx];
+            simOutcomes[gameIdx] = Math.random() < 0.5 ? game[1] : game[3];
+          });
+
+          // Calculate final wins for all entries
+          const finalStandings = entries.map(entry => {
+            let wins = 0;
+            for (let i = 0; i < 27; i++) {
+              const pick = entry.picks[i];
+              if (!pick || pick === '') continue;
+              const winner = results[i + 1] || simOutcomes[i];
+              if (winner && pick === winner) wins++;
+            }
+            return { name: entry.name, wins, tb: entry.tiebreaker };
+          }).sort((a, b) => b.wins - a.wins || a.tb - b.tb);
+
+          // Record finishes for my entries
+          MY_ENTRIES.forEach(name => {
+            const finish = finalStandings.findIndex(e => e.name === name) + 1;
+            simResults[name].finishes.push(finish);
+            if (finish <= 10) simResults[name].top10++;
+            if (finish === 1) simResults[name].wins++;
+          });
+        }
+
+        // Calculate statistics
+        const stats = {};
+        MY_ENTRIES.forEach(name => {
+          const finishes = simResults[name].finishes.sort((a, b) => a - b);
+          stats[name] = {
+            median: finishes[Math.floor(SIMS / 2)],
+            p10: finishes[Math.floor(SIMS * 0.1)],
+            p90: finishes[Math.floor(SIMS * 0.9)],
+            top10Pct: ((simResults[name].top10 / SIMS) * 100).toFixed(1),
+            winPct: ((simResults[name].wins / SIMS) * 100).toFixed(1)
+          };
+        });
+        return stats;
+      }, [entries, results]);
+
+      // Leverage Indicator - which games swing projections most
+      const leverageGames = useMemo(() => {
+        const pendingGames = [];
+        for (let i = 0; i < 27; i++) {
+          if (!results[i + 1]) pendingGames.push(i + 1);
+        }
+
+        const leverage = pendingGames.map(gameNum => {
+          const game = GAMES[gameNum - 1];
+          let totalSwing = 0;
+          let affectedEntries = [];
+
+          MY_ENTRIES.forEach(name => {
+            const entry = entries.find(e => e.name === name);
+            if (!entry) return;
+            const pick = entry.picks[gameNum - 1];
+            const isFav = pick === game[1];
+            // Count how many of the field picked opposite
+            const fieldPicks = entries.filter(e => e.picks[gameNum - 1] === pick).length;
+            const fieldPct = (fieldPicks / entries.length) * 100;
+            const swing = 100 - fieldPct; // Higher swing if contrarian
+            if (swing > 30) {
+              totalSwing += swing;
+              affectedEntries.push({ name, pick, isFav, swing: swing.toFixed(0) });
+            }
+          });
+
+          return { gameNum, game, totalSwing, affectedEntries };
+        }).filter(g => g.totalSwing > 0).sort((a, b) => b.totalSwing - a.totalSwing).slice(0, 5);
+
+        return leverage;
+      }, [entries, results]);
+
+      // Grouped Standings by Record
+      const groupedStandings = useMemo(() => {
+        const groups = {};
+        standings.forEach((entry, idx) => {
+          const key = `${entry.wins}-${entry.losses}`;
+          if (!groups[key]) {
+            groups[key] = { wins: entry.wins, losses: entry.losses, entries: [], hasMyEntry: false, myEntryCount: 0 };
+          }
+          groups[key].entries.push({ ...entry, rank: idx + 1 });
+          if (MY_ENTRIES.includes(entry.name)) {
+            groups[key].hasMyEntry = true;
+            groups[key].myEntryCount++;
+          }
+        });
+        return Object.values(groups).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
       }, [standings]);
 
       const setGameResult = (gameNum, winner) => {
@@ -418,16 +527,30 @@
                             </span>
                           )}
                         </div>
-                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "6px 8px", borderRadius: "6px", marginTop: "6px", fontSize: "0.7rem" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-                            <span style={{ color: "#9CA3AF" }}>Proj:</span>
-                            <span style={{ color: "#F5F5DC" }}>{entry.projectedWins}W</span>
+                        {monteCarloResults && monteCarloResults[entry.name] ? (
+                          <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px", borderRadius: "6px", marginTop: "6px", fontSize: "0.7rem" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                              <span style={{ color: "#9CA3AF" }}>Projected Finish:</span>
+                              <span style={{ color: "#ffd93d", fontWeight: "bold" }}>#{monteCarloResults[entry.name].median}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                              <span style={{ color: "#9CA3AF" }}>80% Range:</span>
+                              <span><span style={{ color: "#6ee7b7" }}>#{monteCarloResults[entry.name].p10}</span> - <span style={{ color: "#f87171" }}>#{monteCarloResults[entry.name].p90}</span></span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                              <span style={{ color: "#9CA3AF" }}>Top 10:</span>
+                              <span style={{ color: monteCarloResults[entry.name].top10Pct > 10 ? "#6ee7b7" : "#F5F5DC" }}>{monteCarloResults[entry.name].top10Pct}%</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: "#9CA3AF" }}>Win Pool:</span>
+                              <span style={{ color: monteCarloResults[entry.name].winPct > 1 ? "#ffd93d" : "#F5F5DC" }}>{monteCarloResults[entry.name].winPct}%</span>
+                            </div>
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span style={{ color: "#9CA3AF" }}>Range:</span>
-                            <span><span style={{ color: "#6ee7b7" }}>#{entry.bestRank}</span> - <span style={{ color: "#f87171" }}>#{entry.worstRank}</span></span>
+                        ) : (
+                          <div style={{ background: "rgba(0,0,0,0.3)", padding: "6px 8px", borderRadius: "6px", marginTop: "6px", fontSize: "0.7rem", color: "#9CA3AF" }}>
+                            All games complete
                           </div>
-                        </div>
+                        )}
                         {data.keyGames && (
                           <div style={{ fontSize: '0.65rem', color: '#9CA3AF', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '6px', marginTop: '4px' }}>
                             {data.keyGames}
@@ -437,9 +560,21 @@
                     );
                   })}
                 </div>
-                <div style={{ marginTop: '12px', padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', fontSize: '0.7rem', color: '#9CA3AF' }}>
-                  <span style={{ color: '#F5F5DC' }}>All 4 agree on 12 games</span> • Split on 15 games (hedged) • <span style={{ color: '#6ee7b7' }}>TRIPOD has most leverage</span>
-                </div>
+                {leverageGames.length > 0 && (
+                  <div style={{ marginTop: '12px', padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#E41C38', marginBottom: '8px', fontWeight: 'bold' }}>HIGH LEVERAGE GAMES</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {leverageGames.slice(0, 3).map(lg => (
+                        <div key={lg.gameNum} style={{ background: 'rgba(228,28,56,0.2)', padding: '6px 10px', borderRadius: '6px', fontSize: '0.7rem' }}>
+                          <div style={{ color: '#F5F5DC', fontWeight: 'bold' }}>{lg.game[4].split(' ')[0]}</div>
+                          <div style={{ color: '#9CA3AF', fontSize: '0.6rem' }}>
+                            {lg.affectedEntries.map(e => e.name.replace("BIG TUNA'S ", "").replace("THE ", "").split(' ')[0]).join(', ')} on {lg.affectedEntries[0]?.isFav ? 'fav' : 'dog'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -494,25 +629,61 @@
             </div>
           )}
 
-          {/* Standings View */}
+          {/* Standings View - Grouped by Record */}
           {view === 'standings' && (
             <div>
-              <input type="text" placeholder="Search entries..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', marginBottom: '15px' }} />
+              <div style={{ marginBottom: '15px', padding: '10px', background: 'rgba(228,28,56,0.1)', borderRadius: '8px', fontSize: '0.75rem', color: '#9CA3AF' }}>
+                Click any record to expand and see entries. <span style={{ color: '#E41C38' }}>Your entries highlighted.</span>
+              </div>
               <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                {filteredStandings.slice(0, 100).map((entry) => {
-                  const rank = standings.findIndex(e => e.name === entry.name) + 1;
-                  const isMine = MY_ENTRIES.includes(entry.name);
+                {groupedStandings.map(group => {
+                  const key = `${group.wins}-${group.losses}`;
+                  const isExpanded = expandedRecords[key];
+                  const firstRank = group.entries[0]?.rank;
+                  const lastRank = group.entries[group.entries.length - 1]?.rank;
                   return (
-                    <div key={entry.name} style={{
-                      display: 'flex', alignItems: 'center', padding: '10px 12px', borderRadius: '8px', marginBottom: '4px',
-                      background: isMine ? 'rgba(228,28,56,0.25)' : rank <= 60 ? 'rgba(78,205,196,0.1)' : 'rgba(255,255,255,0.03)',
-                      border: isMine ? '2px solid #E41C38' : 'none'
-                    }}>
-                      <span style={{ width: '50px', fontWeight: 'bold', color: rank <= 9 ? '#ffd93d' : rank <= 60 ? '#E41C38' : '#666' }}>#{rank}</span>
-                      <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: isMine ? 'bold' : 'normal' }}>{entry.name}</span>
-                      <span style={{ color: '#6ee7b7', marginRight: '10px' }}>{entry.wins}W</span>
-                      <span style={{ color: '#f87171' }}>{entry.losses}L</span>
+                    <div key={key} style={{ marginBottom: '4px' }}>
+                      <div
+                        onClick={() => setExpandedRecords(prev => ({ ...prev, [key]: !prev[key] }))}
+                        style={{
+                          display: 'flex', alignItems: 'center', padding: '12px 14px', borderRadius: '8px', cursor: 'pointer',
+                          background: group.hasMyEntry ? 'rgba(228,28,56,0.25)' : firstRank <= 60 ? 'rgba(78,205,196,0.1)' : 'rgba(255,255,255,0.03)',
+                          border: group.hasMyEntry ? '2px solid #E41C38' : '1px solid rgba(255,255,255,0.05)'
+                        }}>
+                        <span style={{ width: '70px', fontWeight: 'bold', color: firstRank <= 9 ? '#ffd93d' : firstRank <= 60 ? '#E41C38' : '#666', fontSize: '0.8rem' }}>
+                          #{firstRank}{group.entries.length > 1 ? `-${lastRank}` : ''}
+                        </span>
+                        <span style={{ flex: 1 }}>
+                          <span style={{ color: '#6ee7b7', fontWeight: 'bold' }}>{group.wins}W</span>
+                          <span style={{ color: '#4a4a4a' }}> - </span>
+                          <span style={{ color: '#f87171', fontWeight: 'bold' }}>{group.losses}L</span>
+                        </span>
+                        <span style={{ color: '#9CA3AF', marginRight: '10px', fontSize: '0.8rem' }}>{group.entries.length} {group.entries.length === 1 ? 'entry' : 'entries'}</span>
+                        {group.hasMyEntry && (
+                          <span style={{ background: '#E41C38', color: '#000', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', marginRight: '10px' }}>
+                            {group.myEntryCount} YOURS
+                          </span>
+                        )}
+                        <span style={{ color: '#666', fontSize: '1rem' }}>{isExpanded ? '▼' : '▶'}</span>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ marginLeft: '20px', marginTop: '4px', marginBottom: '8px' }}>
+                          {group.entries.map(entry => {
+                            const isMine = MY_ENTRIES.includes(entry.name);
+                            return (
+                              <div key={entry.name} style={{
+                                display: 'flex', alignItems: 'center', padding: '8px 12px', borderRadius: '6px', marginBottom: '2px',
+                                background: isMine ? 'rgba(228,28,56,0.15)' : 'rgba(255,255,255,0.02)',
+                                borderLeft: isMine ? '3px solid #E41C38' : '3px solid transparent'
+                              }}>
+                                <span style={{ width: '45px', fontWeight: 'bold', color: entry.rank <= 9 ? '#ffd93d' : '#666', fontSize: '0.75rem' }}>#{entry.rank}</span>
+                                <span style={{ flex: 1, fontSize: '0.8rem', fontWeight: isMine ? 'bold' : 'normal', color: isMine ? '#F5F5DC' : '#9CA3AF' }}>{entry.name}</span>
+                                <span style={{ fontSize: '0.7rem', color: '#666' }}>TB: {entry.tiebreaker}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
