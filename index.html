@@ -178,7 +178,7 @@
         });
       }, []);
 
-      const myEntriesData = useMemo(() => entries.filter(e => MY_ENTRIES.includes(e.name)), [entries]);
+      const myEntriesData = useMemo(() => MY_ENTRIES.map(name => entries.find(e => e.name === name)).filter(Boolean), [entries]);
 
       const todaysInfo = useMemo(() => {
         const now = new Date();
