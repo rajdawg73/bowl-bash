@@ -227,6 +227,13 @@
 
       const myStandings = useMemo(() => {
         const totalEntries = standings.length;
+
+        // Find pending game indices
+        const pendingGameIndices = [];
+        for (let i = 0; i < 27; i++) {
+          if (!results[i + 1]) pendingGameIndices.push(i);
+        }
+
         return MY_ENTRIES.map(name => {
           const idx = standings.findIndex(e => e.name === name);
           if (idx < 0) return null;
@@ -237,9 +244,46 @@
           const worstCaseWins = entry.wins;
           const bestRank = standings.filter(e => e.wins > bestCaseWins).length + 1;
           const worstRank = Math.min(totalEntries, standings.filter(e => e.wins >= worstCaseWins).length);
-          return { ...entry, rank, projectedWins, bestRank, worstRank };
+
+          // Find next pending game for this entry
+          let nextGame = null;
+          let rankIfWinNext = null;
+          for (const gameIdx of pendingGameIndices) {
+            const pick = entry.picks[gameIdx];
+            if (pick && pick !== '') {
+              const game = GAMES[gameIdx];
+              nextGame = { num: gameIdx + 1, pick, team: pick === game[1] ? game[6] : game[7] };
+              // Calculate rank if we win this game
+              const winsIfWinNext = entry.wins + 1;
+              rankIfWinNext = standings.filter(e => {
+                const theirPick = e.picks[gameIdx];
+                const theyWin = theirPick === pick; // They also picked same team
+                const theirWins = e.wins + (theyWin ? 1 : 0);
+                return theirWins > winsIfWinNext;
+              }).length + 1;
+              break;
+            }
+          }
+
+          // Calculate rank if win out
+          let winsIfWinOut = entry.wins;
+          pendingGameIndices.forEach(gameIdx => {
+            const pick = entry.picks[gameIdx];
+            if (pick && pick !== '') winsIfWinOut++;
+          });
+          const rankIfWinOut = standings.filter(e => {
+            let theirWins = e.wins;
+            pendingGameIndices.forEach(gameIdx => {
+              const myPick = entry.picks[gameIdx];
+              const theirPick = e.picks[gameIdx];
+              if (myPick && myPick !== '' && theirPick === myPick) theirWins++;
+            });
+            return theirWins > winsIfWinOut;
+          }).length + 1;
+
+          return { ...entry, rank, projectedWins, bestRank, worstRank, nextGame, rankIfWinNext, rankIfWinOut };
         }).filter(Boolean);
-      }, [standings]);
+      }, [standings, results]);
 
       // Monte Carlo Simulation (10,000 iterations)
       const monteCarloResults = useMemo(() => {
@@ -563,9 +607,16 @@
                             All games complete
                           </div>
                         )}
-                        {data.keyGames && (
-                          <div style={{ fontSize: '0.65rem', color: '#9CA3AF', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '6px', marginTop: '4px' }}>
-                            {data.keyGames}
+                        {entry.nextGame && (
+                          <div style={{ background: "rgba(228,28,56,0.1)", padding: "8px", borderRadius: "6px", marginTop: "6px", fontSize: "0.7rem", border: "1px solid rgba(228,28,56,0.2)" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                              <span style={{ color: "#9CA3AF" }}>If <span style={{ color: "#F5F5DC" }}>{entry.nextGame.team.split(' ')[0]}</span> wins:</span>
+                              <span style={{ color: "#6ee7b7", fontWeight: "bold" }}>#{entry.rankIfWinNext}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: "#9CA3AF" }}>If win out:</span>
+                              <span style={{ color: entry.rankIfWinOut <= 10 ? "#ffd93d" : entry.rankIfWinOut <= 60 ? "#6ee7b7" : "#F5F5DC", fontWeight: "bold" }}>#{entry.rankIfWinOut}</span>
+                            </div>
                           </div>
                         )}
                       </div>
