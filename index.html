@@ -405,6 +405,86 @@
         return Object.values(groups).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
       }, [standings]);
 
+      // Scenarios for BIG TUNA'S TRIPOD - all possible outcomes
+      const tripodScenarios = useMemo(() => {
+        const tripodEntry = entries.find(e => e.name === "BIG TUNA'S TRIPOD");
+        if (!tripodEntry) return null;
+
+        // Find pending games
+        const pendingGames = [];
+        for (let i = 0; i < 27; i++) {
+          if (!results[i + 1]) {
+            const game = GAMES[i];
+            pendingGames.push({
+              idx: i,
+              num: i + 1,
+              fav: game[1],
+              dog: game[3],
+              favName: game[6],
+              dogName: game[7],
+              bowl: game[4],
+              tripodPick: tripodEntry.picks[i],
+              tripodTeam: tripodEntry.picks[i] === game[1] ? game[6] : game[7]
+            });
+          }
+        }
+
+        if (pendingGames.length === 0) return null;
+
+        // Generate all possible outcome combinations
+        const numGames = pendingGames.length;
+        const numScenarios = Math.pow(2, numGames);
+        const scenarios = [];
+
+        for (let i = 0; i < numScenarios; i++) {
+          const outcomes = [];
+          const simResults = { ...results };
+
+          for (let j = 0; j < numGames; j++) {
+            const game = pendingGames[j];
+            const winFav = (i >> j) & 1;
+            const winner = winFav ? game.fav : game.dog;
+            const winnerName = winFav ? game.favName : game.dogName;
+            const tripodWins = game.tripodPick === winner;
+            simResults[game.num] = winner;
+            outcomes.push({ game, winner, winnerName, tripodWins });
+          }
+
+          // Calculate standings with these results
+          const simStandings = entries.map(entry => {
+            let wins = 0;
+            for (let k = 0; k < 27; k++) {
+              const pick = entry.picks[k];
+              const winner = simResults[k + 1];
+              if (pick && pick !== '' && winner && pick === winner) wins++;
+            }
+            return { name: entry.name, wins, tb: entry.tiebreaker };
+          }).sort((a, b) => b.wins - a.wins || a.tb - b.tb);
+
+          const tripodRank = simStandings.findIndex(e => e.name === "BIG TUNA'S TRIPOD") + 1;
+          const tripodWins = simStandings.find(e => e.name === "BIG TUNA'S TRIPOD")?.wins || 0;
+
+          scenarios.push({ outcomes, tripodRank, tripodWins, simResults });
+        }
+
+        // Sort by best rank for tripod
+        scenarios.sort((a, b) => a.tripodRank - b.tripodRank);
+
+        // Get entries currently ahead of tripod and their picks
+        const tripodCurrentRank = standings.findIndex(e => e.name === "BIG TUNA'S TRIPOD") + 1;
+        const entriesAhead = standings.slice(0, tripodCurrentRank - 1).map(e => {
+          const comparisons = pendingGames.map(game => ({
+            game,
+            theirPick: e.picks[game.idx],
+            theirTeam: e.picks[game.idx] === game.fav ? game.favName : game.dogName,
+            agrees: e.picks[game.idx] === game.tripodPick
+          }));
+          return { name: e.name, wins: e.wins, comparisons };
+        });
+
+        return { pendingGames, scenarios, entriesAhead, tripodCurrentRank };
+      }, [entries, results, standings]);
+
       const setGameResult = (gameNum, winner) => {
         if (!isUnlocked) { setShowPinModal(true); return; }
         const newResults = { ...results };
@@ -657,7 +737,7 @@
 
           {/* Navigation */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
-            {['dashboard', 'games', 'standings', 'payouts'].map(v => (
+            {['dashboard', 'games', 'standings', 'scenarios', 'payouts'].map(v => (
               <button key={v} onClick={() => setView(v)} style={{
                 padding: '10px 16px', borderRadius: '8px', border: 'none',
                 background: view === v ? '#E41C38' : 'rgba(255,255,255,0.1)',
@@ -763,6 +843,105 @@
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Scenarios View - TRIPOD Outcomes */}
+          {view === 'scenarios' && tripodScenarios && (
+            <div>
+              <div style={{ background: 'rgba(228,28,56,0.1)', padding: '15px', borderRadius: '12px', marginBottom: '20px', border: '1px solid rgba(228,28,56,0.3)' }}>
+                <h3 style={{ color: '#E41C38', margin: '0 0 10px', fontSize: '0.9rem' }}>BIG TUNA'S TRIPOD - ALL POSSIBLE OUTCOMES</h3>
+                <div style={{ fontSize: '0.75rem', color: '#9CA3AF', marginBottom: '15px' }}>
+                  Currently #{tripodScenarios.tripodCurrentRank} • {tripodScenarios.pendingGames.length} games remaining
+                </div>
+
+                {/* Remaining Games Header */}
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+                  {tripodScenarios.pendingGames.map(game => (
+                    <div key={game.num} style={{ background: 'rgba(0,0,0,0.3)', padding: '8px 12px', borderRadius: '6px', fontSize: '0.7rem' }}>
+                      <div style={{ color: '#9CA3AF' }}>Game {game.num}</div>
+                      <div style={{ color: '#F5F5DC', fontWeight: 'bold' }}>{game.favName.split(' ')[0]} vs {game.dogName.split(' ')[0]}</div>
+                      <div style={{ color: '#ffd93d', fontSize: '0.65rem' }}>TRIPOD: {game.tripodTeam.split(' ')[0]}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Scenario Outcomes Table */}
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
+                        {tripodScenarios.pendingGames.map(game => (
+                          <th key={game.num} style={{ padding: '8px', textAlign: 'center', color: '#9CA3AF' }}>Game {game.num}</th>
+                        ))}
+                        <th style={{ padding: '8px', textAlign: 'center', color: '#E41C38' }}>Finish</th>
+                        <th style={{ padding: '8px', textAlign: 'center', color: '#6ee7b7' }}>Wins</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tripodScenarios.scenarios.map((scenario, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: scenario.tripodRank <= 10 ? 'rgba(255,215,0,0.1)' : scenario.tripodRank <= 60 ? 'rgba(78,205,196,0.05)' : 'transparent' }}>
+                          {scenario.outcomes.map((outcome, oidx) => (
+                            <td key={oidx} style={{ padding: '8px', textAlign: 'center' }}>
+                              <span style={{ color: outcome.tripodWins ? '#6ee7b7' : '#f87171', fontWeight: outcome.tripodWins ? 'bold' : 'normal' }}>
+                                {outcome.winnerName.split(' ')[0]}
+                              </span>
+                              <span style={{ color: '#666', fontSize: '0.6rem' }}> {outcome.tripodWins ? '✓' : '✗'}</span>
+                            </td>
+                          ))}
+                          <td style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold', color: scenario.tripodRank <= 9 ? '#ffd93d' : scenario.tripodRank <= 60 ? '#6ee7b7' : '#f87171' }}>
+                            #{scenario.tripodRank}
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center', color: '#F5F5DC' }}>{scenario.tripodWins}W</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Entries Ahead Comparison */}
+              <div style={{ background: 'rgba(0,0,0,0.3)', padding: '15px', borderRadius: '12px' }}>
+                <h3 style={{ color: '#E41C38', margin: '0 0 15px', fontSize: '0.9rem' }}>ENTRIES AHEAD OF TRIPOD ({tripodScenarios.entriesAhead.length})</h3>
+                <div style={{ fontSize: '0.7rem', color: '#9CA3AF', marginBottom: '15px' }}>
+                  Showing remaining game picks • <span style={{ color: '#6ee7b7' }}>Green = Same pick</span> • <span style={{ color: '#f87171' }}>Red = Different pick</span>
+                </div>
+                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)', position: 'sticky', top: 0, background: '#1a1a1a' }}>
+                        <th style={{ padding: '8px', textAlign: 'left', color: '#9CA3AF' }}>Entry</th>
+                        <th style={{ padding: '8px', textAlign: 'center', color: '#9CA3AF' }}>W</th>
+                        {tripodScenarios.pendingGames.map(game => (
+                          <th key={game.num} style={{ padding: '8px', textAlign: 'center', color: '#9CA3AF' }}>G{game.num}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom: '2px solid #E41C38', background: 'rgba(228,28,56,0.15)' }}>
+                        <td style={{ padding: '8px', fontWeight: 'bold', color: '#ffd93d' }}>TRIPOD (You)</td>
+                        <td style={{ padding: '8px', textAlign: 'center', color: '#F5F5DC' }}>{standings.find(e => e.name === "BIG TUNA'S TRIPOD")?.wins}</td>
+                        {tripodScenarios.pendingGames.map(game => (
+                          <td key={game.num} style={{ padding: '8px', textAlign: 'center', color: '#ffd93d', fontWeight: 'bold' }}>
+                            {game.tripodTeam.split(' ')[0]}
+                          </td>
+                        ))}
+                      </tr>
+                      {tripodScenarios.entriesAhead.map(entry => (
+                        <tr key={entry.name} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <td style={{ padding: '8px', color: '#F5F5DC' }}>{entry.name}</td>
+                          <td style={{ padding: '8px', textAlign: 'center', color: '#9CA3AF' }}>{entry.wins}</td>
+                          {entry.comparisons.map((comp, idx) => (
+                            <td key={idx} style={{ padding: '8px', textAlign: 'center', color: comp.agrees ? '#6ee7b7' : '#f87171', fontWeight: comp.agrees ? 'normal' : 'bold' }}>
+                              {comp.theirTeam.split(' ')[0]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
