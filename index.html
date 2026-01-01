@@ -405,8 +405,9 @@
         return Object.values(groups).sort((a, b) => b.wins - a.wins || a.losses - b.losses);
       }, [standings]);
 
-      // Scenarios for BIG TUNA'S TRIPOD - all possible outcomes
+      // Scenarios for BIG TUNA'S TRIPOD - all possible outcomes (only calc when viewing)
       const tripodScenarios = useMemo(() => {
+        if (view !== 'scenarios') return null;
         const tripodEntry = entries.find(e => e.name === "BIG TUNA'S TRIPOD");
         if (!tripodEntry) return null;
 
@@ -483,7 +484,7 @@
         });
 
         return { pendingGames, scenarios, entriesAhead, tripodCurrentRank };
-      }, [entries, results, standings]);
+      }, [view, entries, results, standings]);
 
       const setGameResult = (gameNum, winner) => {
         if (!isUnlocked) { setShowPinModal(true); return; }
