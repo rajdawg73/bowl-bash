@@ -483,7 +483,9 @@
           const rankAt40 = calcRankAtScore(40);
           const rankAt45 = calcRankAtScore(45);
           const rankAt50 = calcRankAtScore(50);
+          const rankAt51 = calcRankAtScore(51);
           const rankAt54 = calcRankAtScore(54);
+          const rankAt55 = calcRankAtScore(55);
 
           const firstWithRecord = simStandings.filter(e => e.wins > tripodWins).length + 1;
           const lastWithRecord = firstWithRecord + tiedCount - 1;
@@ -492,7 +494,7 @@
             outcomes, tripodWins, tiedCount,
             tripodRankBest: firstWithRecord,
             tripodRankWorst: lastWithRecord,
-            rankAt35, rankAt40, rankAt45, rankAt50, rankAt54
+            rankAt35, rankAt40, rankAt45, rankAt50, rankAt51, rankAt54, rankAt55
           });
         }
 
@@ -910,7 +912,9 @@
                         <th style={{ padding: '6px', textAlign: 'center', color: '#fb923c' }}>@40</th>
                         <th style={{ padding: '6px', textAlign: 'center', color: '#fbbf24' }}>@45</th>
                         <th style={{ padding: '6px', textAlign: 'center', color: '#a3e635' }}>@50</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#4ade80' }}>@51</th>
                         <th style={{ padding: '6px', textAlign: 'center', color: '#6ee7b7', background: 'rgba(110,231,183,0.1)' }}>@54</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#5eead4' }}>@55</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -929,7 +933,9 @@
                           <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt40 <= 9 ? '#ffd93d' : scenario.rankAt40 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt40}</td>
                           <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt45 <= 9 ? '#ffd93d' : scenario.rankAt45 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt45}</td>
                           <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt50 <= 9 ? '#ffd93d' : scenario.rankAt50 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt50}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt51 <= 9 ? '#ffd93d' : scenario.rankAt51 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt51}</td>
                           <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt54 <= 9 ? '#ffd93d' : scenario.rankAt54 <= 60 ? '#6ee7b7' : '#f87171', background: 'rgba(110,231,183,0.1)' }}>#{scenario.rankAt54}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt55 <= 9 ? '#ffd93d' : scenario.rankAt55 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt55}</td>
                         </tr>
                       ))}
                     </tbody>
