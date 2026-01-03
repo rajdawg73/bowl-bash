@@ -460,23 +460,44 @@
               if (pick && pick !== '' && winner && pick === winner) wins++;
             }
             return { name: entry.name, wins, tb: entry.tiebreaker };
-          }).sort((a, b) => b.wins - a.wins || a.tb - b.tb);
+          });
 
           const tripodData = simStandings.find(e => e.name === "BIG TUNA'S TRIPOD");
           const tripodWins = tripodData?.wins || 0;
-          const tripodRank = simStandings.findIndex(e => e.name === "BIG TUNA'S TRIPOD") + 1;
+          const tripodTB = tripodData?.tb || 54;
 
           // Calculate rank range based on same-record entries
           const sameRecordEntries = simStandings.filter(e => e.wins === tripodWins);
-          const firstWithRecord = simStandings.findIndex(e => e.wins === tripodWins) + 1;
-          const lastWithRecord = firstWithRecord + sameRecordEntries.length - 1;
           const tiedCount = sameRecordEntries.length;
 
-          scenarios.push({ outcomes, tripodRank, tripodWins, tripodRankBest: firstWithRecord, tripodRankWorst: lastWithRecord, tiedCount, simResults });
+          // Calculate rank at different tiebreaker scores
+          const calcRankAtScore = (finalScore) => {
+            const sorted = [...simStandings].sort((a, b) => {
+              if (b.wins !== a.wins) return b.wins - a.wins;
+              return Math.abs(a.tb - finalScore) - Math.abs(b.tb - finalScore);
+            });
+            return sorted.findIndex(e => e.name === "BIG TUNA'S TRIPOD") + 1;
+          };
+
+          const rankAt35 = calcRankAtScore(35);
+          const rankAt40 = calcRankAtScore(40);
+          const rankAt45 = calcRankAtScore(45);
+          const rankAt50 = calcRankAtScore(50);
+          const rankAt54 = calcRankAtScore(54);
+
+          const firstWithRecord = simStandings.filter(e => e.wins > tripodWins).length + 1;
+          const lastWithRecord = firstWithRecord + tiedCount - 1;
+
+          scenarios.push({
+            outcomes, tripodWins, tiedCount,
+            tripodRankBest: firstWithRecord,
+            tripodRankWorst: lastWithRecord,
+            rankAt35, rankAt40, rankAt45, rankAt50, rankAt54
+          });
         }
 
-        // Sort by best rank for tripod
-        scenarios.sort((a, b) => a.tripodRank - b.tripodRank);
+        // Sort by best possible rank for tripod
+        scenarios.sort((a, b) => a.tripodRankBest - b.tripodRankBest);
 
         // Get entries currently ahead of tripod and their picks
         const tripodCurrentRank = standings.findIndex(e => e.name === "BIG TUNA'S TRIPOD") + 1;
@@ -877,46 +898,45 @@
 
                 {/* Scenario Outcomes Table */}
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.7rem' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
                         {tripodScenarios.pendingGames.map(game => (
-                          <th key={game.num} style={{ padding: '8px', textAlign: 'center', color: '#9CA3AF' }}>Game {game.num}</th>
+                          <th key={game.num} style={{ padding: '6px', textAlign: 'center', color: '#9CA3AF' }}>G{game.num}</th>
                         ))}
-                        <th style={{ padding: '8px', textAlign: 'center', color: '#E41C38' }}>Finish Range</th>
-                        <th style={{ padding: '8px', textAlign: 'center', color: '#6ee7b7' }}>Record</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#6ee7b7' }}>W</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#9CA3AF' }}>Tied</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#f87171', background: 'rgba(248,113,113,0.1)' }}>@35</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#fb923c' }}>@40</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#fbbf24' }}>@45</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#a3e635' }}>@50</th>
+                        <th style={{ padding: '6px', textAlign: 'center', color: '#6ee7b7', background: 'rgba(110,231,183,0.1)' }}>@54</th>
                       </tr>
                     </thead>
                     <tbody>
                       {tripodScenarios.scenarios.map((scenario, idx) => (
                         <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: scenario.tripodRankBest <= 10 ? 'rgba(255,215,0,0.1)' : scenario.tripodRankWorst <= 60 ? 'rgba(78,205,196,0.05)' : 'transparent' }}>
                           {scenario.outcomes.map((outcome, oidx) => (
-                            <td key={oidx} style={{ padding: '8px', textAlign: 'center' }}>
+                            <td key={oidx} style={{ padding: '6px', textAlign: 'center' }}>
                               <span style={{ color: outcome.tripodWins ? '#6ee7b7' : '#f87171', fontWeight: outcome.tripodWins ? 'bold' : 'normal' }}>
-                                {outcome.winnerName.split(' ')[0]}
+                                {outcome.winnerName.split(' ')[0].substring(0, 4)}
                               </span>
-                              <span style={{ color: '#666', fontSize: '0.6rem' }}> {outcome.tripodWins ? '✓' : '✗'}</span>
                             </td>
                           ))}
-                          <td style={{ padding: '8px', textAlign: 'center', fontWeight: 'bold' }}>
-                            {scenario.tiedCount > 1 ? (
-                              <span>
-                                <span style={{ color: scenario.tripodRankBest <= 9 ? '#ffd93d' : scenario.tripodRankBest <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.tripodRankBest}</span>
-                                <span style={{ color: '#666' }}>-</span>
-                                <span style={{ color: scenario.tripodRankWorst <= 9 ? '#ffd93d' : scenario.tripodRankWorst <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.tripodRankWorst}</span>
-                              </span>
-                            ) : (
-                              <span style={{ color: scenario.tripodRank <= 9 ? '#ffd93d' : scenario.tripodRank <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.tripodRank}</span>
-                            )}
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center', color: '#F5F5DC' }}>
-                            {scenario.tripodWins}W
-                            {scenario.tiedCount > 1 && <span style={{ color: '#666', fontSize: '0.6rem' }}> ({scenario.tiedCount} tied)</span>}
-                          </td>
+                          <td style={{ padding: '6px', textAlign: 'center', color: '#F5F5DC', fontWeight: 'bold' }}>{scenario.tripodWins}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', color: '#9CA3AF' }}>{scenario.tiedCount}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt35 <= 9 ? '#ffd93d' : scenario.rankAt35 <= 60 ? '#6ee7b7' : '#f87171', background: 'rgba(248,113,113,0.1)' }}>#{scenario.rankAt35}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt40 <= 9 ? '#ffd93d' : scenario.rankAt40 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt40}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt45 <= 9 ? '#ffd93d' : scenario.rankAt45 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt45}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt50 <= 9 ? '#ffd93d' : scenario.rankAt50 <= 60 ? '#6ee7b7' : '#f87171' }}>#{scenario.rankAt50}</td>
+                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold', color: scenario.rankAt54 <= 9 ? '#ffd93d' : scenario.rankAt54 <= 60 ? '#6ee7b7' : '#f87171', background: 'rgba(110,231,183,0.1)' }}>#{scenario.rankAt54}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div style={{ marginTop: '10px', fontSize: '0.65rem', color: '#9CA3AF', textAlign: 'center' }}>
+                  TRIPOD TB guess: 54 • Columns show finish at different final scores • <span style={{ color: '#6ee7b7' }}>Green = Top 60 (money)</span> • <span style={{ color: '#ffd93d' }}>Gold = Top 9</span>
                 </div>
               </div>
 
